@@ -14,6 +14,8 @@ import {
   shortAddr,
 } from "@/lib/format";
 import { PERMISSIONS } from "@/lib/permissions";
+import { useMultiChain } from "@/lib/useMultiChain";
+import type { LiveAddressProbeResult } from "@/lib/multichain-live";
 import {
   ArrowLeft,
   Share2,
@@ -34,6 +36,8 @@ import {
   Flame,
   CheckCircle2,
   Lock,
+  RefreshCw,
+  Globe,
 } from "lucide-react";
 
 interface CaseDetailViewProps {
@@ -58,6 +62,22 @@ export function CaseDetailView({
   const [newNote, setNewNote] = useState("");
   const [verifyingEvidence, setVerifyingEvidence] = useState(false);
   const [evidenceVerified, setEvidenceVerified] = useState<boolean | null>(null);
+
+  const { probeAddress } = useMultiChain();
+  const [liveProbe, setLiveProbe] = useState<LiveAddressProbeResult | null>(null);
+  const [isProbingOnChain, setIsProbingOnChain] = useState(false);
+
+  const handleProbeOnChain = async () => {
+    setIsProbingOnChain(true);
+    try {
+      const res = await probeAddress(investigationCase.reportedWallet, investigationCase.chain);
+      setLiveProbe(res);
+    } catch (e) {
+      console.error("Failed to probe on-chain:", e);
+    } finally {
+      setIsProbingOnChain(false);
+    }
+  };
 
   const intelData = generateCaseInvestigationData(investigationCase);
   const canUpdateStatus = PERMISSIONS.updateStatus(currentRole);
@@ -170,30 +190,73 @@ export function CaseDetailView({
           </div>
         </div>
 
-        {/* Primary Wallet Copier */}
-        <div className="flex flex-wrap items-center justify-between gap-3 bg-black/30 rounded-xl p-3 border border-white/5 text-xs">
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="font-semibold text-slate-400 shrink-0">Primary Suspect Wallet:</span>
-            <span className="font-mono text-amber-300 font-medium truncate">{investigationCase.reportedWallet}</span>
-            <button
-              onClick={() => handleCopy(investigationCase.reportedWallet)}
-              className="text-slate-400 hover:text-white transition p-1 shrink-0"
-              title="Copy address"
-            >
-              {copied === investigationCase.reportedWallet ? (
-                <Check className="size-3.5 text-green-400" />
-              ) : (
-                <Copy className="size-3.5" />
-              )}
-            </button>
+        {/* Primary Wallet Copier & Live Blockchain Probe */}
+        <div className="space-y-2 bg-black/30 rounded-xl p-3 border border-white/5 text-xs">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="font-semibold text-slate-400 shrink-0">Primary Suspect Wallet:</span>
+              <span className="font-mono text-amber-300 font-medium truncate">{investigationCase.reportedWallet}</span>
+              <button
+                onClick={() => handleCopy(investigationCase.reportedWallet)}
+                className="text-slate-400 hover:text-white transition p-1 shrink-0"
+                title="Copy address"
+              >
+                {copied === investigationCase.reportedWallet ? (
+                  <Check className="size-3.5 text-green-400" />
+                ) : (
+                  <Copy className="size-3.5" />
+                )}
+              </button>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-1.5 text-slate-400">
+                <span>Recovery Probability:</span>
+                <span className="font-mono font-bold text-amber-400">
+                  {Math.round(investigationCase.recoveryProbability * 100)}%
+                </span>
+              </div>
+
+              <button
+                onClick={handleProbeOnChain}
+                disabled={isProbingOnChain}
+                className="flex items-center gap-1.5 rounded-lg bg-amber-400/10 hover:bg-amber-400/20 border border-amber-400/30 text-amber-300 px-3 py-1 text-xs font-semibold transition disabled:opacity-50"
+              >
+                <RefreshCw className={`size-3 ${isProbingOnChain ? "animate-spin" : ""}`} />
+                <span>{isProbingOnChain ? "Querying RPC..." : "Probe Live On-Chain"}</span>
+              </button>
+            </div>
           </div>
 
-          <div className="flex items-center gap-2 text-slate-400">
-            <span>Recovery Probability:</span>
-            <span className="font-mono font-bold text-amber-400">
-              {Math.round(investigationCase.recoveryProbability * 100)}%
-            </span>
-          </div>
+          {/* Live On-Chain Probe Result Banner */}
+          {liveProbe && (
+            <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="size-2 rounded-full bg-emerald-400 animate-pulse" />
+                <span className="text-slate-300 font-medium">Verified On-Chain:</span>
+                <span className="font-bold text-white font-mono">{liveProbe.balanceFormatted}</span>
+                <span className="text-emerald-400 font-bold font-mono">({usd(liveProbe.usdValue)})</span>
+                {liveProbe.inrValue > 0 && (
+                  <span className="text-slate-400 text-[11px] font-mono">
+                    ₹{liveProbe.inrValue.toLocaleString(undefined, { maximumFractionDigits: 0 })} INR
+                  </span>
+                )}
+                <span className="text-slate-500 text-[10px]">· Verified {new Date(liveProbe.queriedAt).toLocaleTimeString()}</span>
+              </div>
+
+              {liveProbe.explorerUrl && (
+                <a
+                  href={liveProbe.explorerUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1 text-emerald-400 hover:text-white underline text-[11px] shrink-0"
+                >
+                  <span>Inspect on Explorer</span>
+                  <ExternalLink className="size-3" />
+                </a>
+              )}
+            </div>
+          )}
         </div>
       </div>
 

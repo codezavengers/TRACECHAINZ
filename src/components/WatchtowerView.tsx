@@ -1,6 +1,7 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import type { WatchlistWallet, Chain } from "@/lib/types";
 import { CHAIN_LABEL, usd, relTime, shortAddr } from "@/lib/format";
+import { useMultiChain } from "@/lib/useMultiChain";
 import {
   ShieldAlert,
   PlusCircle,
@@ -12,6 +13,9 @@ import {
   Check,
   Eye,
   Activity,
+  RefreshCw,
+  ExternalLink,
+  Zap,
 } from "lucide-react";
 
 interface WatchtowerViewProps {
@@ -21,18 +25,30 @@ interface WatchtowerViewProps {
   onSelectCase?: (caseId: string) => void;
 }
 
+interface LiveWalletBalance {
+  nativeBalance: number;
+  balanceFormatted: string;
+  usdValue: number;
+  inrValue: number;
+  isLive: boolean;
+  explorerUrl: string;
+}
+
 export function WatchtowerView({
   watchlist,
   onAddWallet,
   onRemoveWallet,
   onSelectCase,
 }: WatchtowerViewProps) {
+  const { probeAddress, isProbing } = useMultiChain();
   const [search, setSearch] = useState("");
   const [showAddModal, setShowAddModal] = useState(false);
   const [newAddr, setNewAddr] = useState("");
   const [newChain, setNewChain] = useState<Chain>("ethereum");
   const [newLabel, setNewLabel] = useState("");
   const [copied, setCopied] = useState<string | null>(null);
+  const [liveBalances, setLiveBalances] = useState<Record<string, LiveWalletBalance>>({});
+  const [isPollingAll, setIsPollingAll] = useState(false);
 
   const handleCopy = (text: string) => {
     navigator.clipboard.writeText(text);
@@ -40,19 +56,68 @@ export function WatchtowerView({
     setTimeout(() => setCopied(null), 2000);
   };
 
-  const handleAddSubmit = (e: React.FormEvent) => {
+  const pollAllOnChain = async () => {
+    setIsPollingAll(true);
+    const updates: Record<string, LiveWalletBalance> = {};
+    for (const w of watchlist) {
+      try {
+        const res = await probeAddress(w.address, w.chain);
+        updates[w.address] = {
+          nativeBalance: res.balanceNative,
+          balanceFormatted: res.balanceFormatted,
+          usdValue: res.usdValue,
+          inrValue: res.inrValue,
+          isLive: res.isLive,
+          explorerUrl: res.explorerUrl,
+        };
+      } catch (err) {
+        console.error("Watchtower probe error:", err);
+      }
+    }
+    setLiveBalances((prev) => ({ ...prev, ...updates }));
+    setIsPollingAll(false);
+  };
+
+  useEffect(() => {
+    pollAllOnChain();
+  }, [watchlist.length]);
+
+  const handleAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newAddr.trim()) return;
 
+    const trimmedAddr = newAddr.trim();
+    let initialUsd = 0;
+    let initialBalance = 0;
+
+    try {
+      const probeRes = await probeAddress(trimmedAddr, newChain);
+      initialUsd = probeRes.usdValue;
+      initialBalance = probeRes.balanceNative;
+      setLiveBalances((prev) => ({
+        ...prev,
+        [trimmedAddr]: {
+          nativeBalance: probeRes.balanceNative,
+          balanceFormatted: probeRes.balanceFormatted,
+          usdValue: probeRes.usdValue,
+          inrValue: probeRes.inrValue,
+          isLive: probeRes.isLive,
+          explorerUrl: probeRes.explorerUrl,
+        },
+      }));
+    } catch {
+      // fallback
+    }
+
     onAddWallet({
-      address: newAddr.trim(),
+      address: trimmedAddr,
       chain: newChain,
       label: newLabel.trim() || "Monitored Suspect Address",
       status: "ACTIVE",
       riskScore: 88,
-      balance: 0,
-      usdBalance: 12500,
-      balanceUsd: 12500,
+      balance: initialBalance,
+      usdBalance: initialUsd,
+      balanceUsd: initialUsd,
       addedAt: new Date().toISOString(),
       lastActivity: new Date().toISOString(),
     });
@@ -85,12 +150,23 @@ export function WatchtowerView({
           </p>
         </div>
 
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="flex items-center gap-2 rounded-xl bg-amber-400 hover:bg-amber-300 px-4 py-2.5 text-xs font-semibold text-black transition shadow-lg shadow-amber-400/20 shrink-0"
-        >
-          <PlusCircle className="size-4" /> Add Wallet to Watchtower
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={pollAllOnChain}
+            disabled={isPollingAll}
+            className="flex items-center gap-2 rounded-xl bg-amber-400/10 hover:bg-amber-400/20 text-amber-300 border border-amber-400/30 px-3.5 py-2.5 text-xs font-semibold transition shrink-0"
+          >
+            <RefreshCw className={`size-3.5 ${isPollingAll ? "animate-spin" : ""}`} />
+            {isPollingAll ? "Polling Blockchains..." : "Poll Live Blockchains"}
+          </button>
+
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="flex items-center gap-2 rounded-xl bg-amber-400 hover:bg-amber-300 px-4 py-2.5 text-xs font-semibold text-black transition shadow-lg shadow-amber-400/20 shrink-0"
+          >
+            <PlusCircle className="size-4" /> Add Wallet to Watchtower
+          </button>
+        </div>
       </div>
 
       {/* Search */}
@@ -177,7 +253,43 @@ export function WatchtowerView({
                     </span>
                   </td>
 
-                  <td className="p-3.5 font-mono font-bold text-white">{usd(item.balanceUsd)}</td>
+                  <td className="p-3.5 font-mono">
+                    {liveBalances[item.address] ? (
+                      <div className="space-y-0.5">
+                        <div className="font-bold text-white flex items-center gap-1.5">
+                          <span>{usd(liveBalances[item.address].usdValue)}</span>
+                          <span className="text-[9px] bg-emerald-500/20 text-emerald-300 font-sans px-1 py-0.2 rounded font-bold">
+                            LIVE
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-amber-300 flex items-center gap-1">
+                          <span>{liveBalances[item.address].balanceFormatted}</span>
+                          {liveBalances[item.address].explorerUrl && (
+                            <a
+                              href={liveBalances[item.address].explorerUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-slate-400 hover:text-white"
+                              title="Inspect on live blockchain explorer"
+                            >
+                              <ExternalLink className="size-2.5" />
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-0.5">
+                        <div className="font-bold text-white">{usd(item.balanceUsd)}</div>
+                        <div className="text-[10px] text-slate-400">
+                          {isPollingAll ? (
+                            <span className="animate-pulse text-amber-400">Querying on-chain...</span>
+                          ) : (
+                            <span>{item.balance} {item.chain === "bitcoin" ? "BTC" : item.chain === "ethereum" ? "ETH" : "tokens"}</span>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </td>
 
                   <td className="p-3.5">
                     {item.caseId ? (

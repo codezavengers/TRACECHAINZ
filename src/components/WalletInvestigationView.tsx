@@ -2,7 +2,9 @@ import React, { useState, useEffect } from "react";
 import type { Chain, WalletKind } from "@/lib/types";
 import { CHAIN_LABEL, usd, relTime, shortAddr } from "@/lib/format";
 import { useLiveBitcoin } from "@/lib/useLiveBitcoin";
+import { useMultiChain } from "@/lib/useMultiChain";
 import type { LiveBitcoinAddressData } from "@/lib/bitcoin-live";
+import type { LiveAddressProbeResult } from "@/lib/multichain-live";
 import {
   Wallet,
   Search,
@@ -28,31 +30,47 @@ interface WalletInvestigationViewProps {
   onAddToWatchtower?: (addr: string, chain: Chain, label: string) => void;
 }
 
-const NOTABLE_BITCOIN_ADDRESSES = [
+const NOTABLE_PRESET_ADDRESSES: {
+  label: string;
+  address: string;
+  chain: Chain;
+  desc: string;
+}[] = [
   {
-    label: "Satoshi Genesis Target",
+    label: "Satoshi Genesis (BTC)",
     address: "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa",
-    desc: "First ever Bitcoin address (Block 0 Coinbase & historical tributes)",
+    chain: "bitcoin",
+    desc: "First ever Bitcoin address (Block 0 Coinbase & tributes)",
   },
   {
-    label: "Binance Cold Storage",
+    label: "Binance Cold (BTC)",
     address: "34xp4vRoCGJym3xR7yCVPFHoCNxv4Twseo",
+    chain: "bitcoin",
     desc: "Largest exchange cold wallet (~248,597 BTC reserve)",
   },
   {
-    label: "Silk Road DOJ Seizure",
-    address: "1F1tAaz5x1HUXrCNLbtMDqcw6o5GNn4xqX",
-    desc: "Historic darknet marketplace law enforcement seizure address",
+    label: "Vitalik Buterin (ETH)",
+    address: "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+    chain: "ethereum",
+    desc: "Ethereum co-founder public primary wallet (vitalik.eth)",
   },
   {
-    label: "Bitfinex 2016 Hack Node",
-    address: "1P5ZEDWTKTFGxQjZphgWPQUpe554WKDfHQ",
-    desc: "Laundered transit address tracked in international recovery",
+    label: "Canonical WETH (ETH)",
+    address: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+    chain: "ethereum",
+    desc: "Wrapped Ether ERC-20 smart contract on Ethereum mainnet",
   },
   {
-    label: "Darknet Mixer Peel Node",
-    address: "bc1q9d4zpv76n2n7r6y4y8r4qvd08w5k4n6p7e0a2s",
-    desc: "Modern SegWit bech32 peel-chain dispersal suspect address",
+    label: "Tether USD (TRON)",
+    address: "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t",
+    chain: "tron",
+    desc: "Primary USDT smart contract on TRON TRC-20 network",
+  },
+  {
+    label: "Binance Hot (SOL)",
+    address: "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+    chain: "solana",
+    desc: "High volume verified exchange liquidity account on Solana",
   },
 ];
 
@@ -65,9 +83,11 @@ export function WalletInvestigationView({
   const [copied, setCopied] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
-  // Live Bitcoin Internet query state
-  const { data: btcNetwork, queryAddress, isQueryingAddress } = useLiveBitcoin();
+  // Live Bitcoin and Multi-Chain query states
+  const { data: btcNetwork, queryAddress, isQueryingAddress: isQueryingBtc } = useLiveBitcoin();
+  const { probeAddress, isProbing } = useMultiChain();
   const [liveBtcData, setLiveBtcData] = useState<LiveBitcoinAddressData | null>(null);
+  const [liveProbeData, setLiveProbeData] = useState<LiveAddressProbeResult | null>(null);
   const [liveQueryError, setLiveQueryError] = useState<string | null>(null);
 
   const handleCopy = (text: string) => {
@@ -95,7 +115,7 @@ export function WalletInvestigationView({
 
   const isValid = isEth || isBtc || isTron || isSol;
 
-  // Trigger live Bitcoin lookup when analyzed
+  // Trigger live on-chain lookup
   const runAnalysis = async (addrToAnalyze?: string) => {
     const target = (addrToAnalyze || addressInput).trim();
     setAnalyzed(true);
@@ -103,6 +123,7 @@ export function WalletInvestigationView({
 
     const isTargetBtc = /^(?:bc1|[13])[a-zA-HJ-NP-Z0-9]{25,62}$/.test(target);
     if (isTargetBtc) {
+      setLiveProbeData(null);
       try {
         const result = await queryAddress(target);
         setLiveBtcData(result);
@@ -112,14 +133,24 @@ export function WalletInvestigationView({
       }
     } else {
       setLiveBtcData(null);
+      try {
+        let chain: Chain = "ethereum";
+        if (/^T[A-Za-z1-9]{33}$/.test(target)) chain = "tron";
+        else if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(target)) chain = "solana";
+        const result = await probeAddress(target, chain);
+        setLiveProbeData(result);
+      } catch (err: any) {
+        console.error("Live multi-chain query error:", err);
+        setLiveQueryError(err?.message || `Failed to probe address on ${detectedChain}`);
+      }
     }
   };
 
   useEffect(() => {
-    if (analyzed && isBtc && !liveBtcData) {
+    if (analyzed && !liveBtcData && !liveProbeData) {
       runAnalysis();
     }
-  }, [addressInput, isBtc]);
+  }, [addressInput]);
 
   // Fallback / simulated telemetry for non-BTC chains
   const telemetry = {
@@ -197,10 +228,10 @@ export function WalletInvestigationView({
             </div>
             <button
               onClick={() => runAnalysis()}
-              disabled={isQueryingAddress}
+              disabled={isQueryingBtc || isProbing}
               className="flex items-center justify-center gap-2 rounded-xl bg-amber-400 hover:bg-amber-300 px-5 py-2.5 text-xs font-semibold text-black transition shadow-lg shadow-amber-400/20 disabled:opacity-50"
             >
-              {isQueryingAddress ? (
+              {isQueryingBtc || isProbing ? (
                 <>
                   <RefreshCw className="size-3.5 animate-spin" />
                   <span>Probing Mainnet…</span>
@@ -215,13 +246,13 @@ export function WalletInvestigationView({
           </div>
         </div>
 
-        {/* Quick Presets for Live Bitcoin Forensic Probing */}
+        {/* Quick Presets for Live Multi-Chain Forensic Probing */}
         <div className="space-y-1.5 pt-1 border-t border-white/5">
           <div className="text-[11px] font-medium text-slate-400">
-            Quick Select Notable Live Bitcoin Addresses:
+            Quick Select Notable Live Blockchain Addresses:
           </div>
           <div className="flex flex-wrap gap-2">
-            {NOTABLE_BITCOIN_ADDRESSES.map((target) => (
+            {NOTABLE_PRESET_ADDRESSES.map((target) => (
               <button
                 key={target.address}
                 onClick={() => {
@@ -460,16 +491,50 @@ export function WalletInvestigationView({
               </div>
             </div>
           ) : (
-            /* Non-Bitcoin fallback or loading state */
+            /* Non-Bitcoin on-chain verified state */
             <div className="space-y-6">
+              {liveProbeData && (
+                <div className="flex items-center justify-between text-xs bg-emerald-500/10 border border-emerald-500/30 rounded-xl px-4 py-2.5 text-emerald-300">
+                  <span className="flex items-center gap-2 font-semibold">
+                    <span className="size-2 rounded-full bg-emerald-400 animate-pulse" />
+                    Live {CHAIN_LABEL[detectedChain]} Mainnet Verified On-Chain Data
+                  </span>
+                  <div className="flex items-center gap-3">
+                    <span className="text-slate-400 font-mono text-[11px]">
+                      Verified via Public RPC · {new Date(liveProbeData.queriedAt).toLocaleTimeString()}
+                    </span>
+                    {liveProbeData.explorerUrl && (
+                      <a
+                        href={liveProbeData.explorerUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-emerald-400 hover:text-white font-sans text-xs underline"
+                      >
+                        <span>View on Block Explorer</span>
+                        <ExternalLink className="size-3" />
+                      </a>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* Overview Cards */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="rounded-xl border border-white/10 bg-[#161a24] p-4.5 space-y-1">
-                  <span className="text-slate-400 text-xs font-medium uppercase tracking-wider">Identified Balance</span>
+                  <span className="text-slate-400 text-xs font-medium uppercase tracking-wider">
+                    {liveProbeData ? "Live On-Chain Balance" : "Identified Balance"}
+                  </span>
                   <div className="text-2xl font-bold font-mono text-white">
-                    {telemetry.balance} {telemetry.ticker}
+                    {liveProbeData ? liveProbeData.balanceFormatted : `${telemetry.balance} ${telemetry.ticker}`}
                   </div>
-                  <div className="text-xs text-emerald-400 font-mono font-medium">{usd(telemetry.usdValue)}</div>
+                  <div className="text-xs text-emerald-400 font-mono font-medium">
+                    {usd(liveProbeData ? liveProbeData.usdValue : telemetry.usdValue)}
+                    {liveProbeData && liveProbeData.inrValue > 0 && (
+                      <span className="text-slate-400 font-sans text-[11px] ml-2">
+                        (₹{liveProbeData.inrValue.toLocaleString(undefined, { maximumFractionDigits: 0 })})
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 <div className="rounded-xl border border-white/10 bg-[#161a24] p-4.5 space-y-1">

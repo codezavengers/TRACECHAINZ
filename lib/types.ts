@@ -333,6 +333,8 @@ export interface InvestigationCase {
   investigator: string
   reportedLossUsd: number
   traceableUsd: number
+  cryptoAmount?: number
+  cryptoAsset?: string
   recoveryProbability: number
   connectedVictims: number
   createdAt: string

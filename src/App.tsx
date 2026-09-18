@@ -16,6 +16,7 @@ import {
   INITIAL_VASPS,
 } from "@/lib/store";
 import { LiveBitcoinProvider } from "@/lib/useLiveBitcoin";
+import { MultiChainProvider } from "@/lib/useMultiChain";
 import { AppShell } from "@/components/AppShell";
 import { DashboardView } from "@/components/DashboardView";
 import { CasesListView } from "@/components/CasesListView";
@@ -145,110 +146,112 @@ export default function App() {
   const selectedCase = cases.find((c) => c.id === selectedCaseId) || cases[0];
 
   return (
-    <LiveBitcoinProvider>
-      <AppShell
-        currentView={currentView}
-        onNavigate={(v: string) => {
-          setCurrentView(v);
-          window.scrollTo({ top: 0, behavior: "smooth" });
-        }}
-        currentUser={currentUser}
-        availableUsers={INITIAL_USERS}
-        onSwitchUser={setCurrentUser}
-        alerts={alerts}
-        onOpenCreateCase={() => setIsCreateModalOpen(true)}
-      >
-        {currentView === "dashboard" && (
-          <DashboardView
-            cases={cases}
-            alerts={alerts}
-            onSelectCase={handleSelectCase}
-            onNavigate={(v: string) => setCurrentView(v)}
-            onOpenCreateCase={() => setIsCreateModalOpen(true)}
+    <MultiChainProvider>
+      <LiveBitcoinProvider>
+        <AppShell
+          currentView={currentView}
+          onNavigate={(v: string) => {
+            setCurrentView(v);
+            window.scrollTo({ top: 0, behavior: "smooth" });
+          }}
+          currentUser={currentUser}
+          availableUsers={INITIAL_USERS}
+          onSwitchUser={setCurrentUser}
+          alerts={alerts}
+          onOpenCreateCase={() => setIsCreateModalOpen(true)}
+        >
+          {currentView === "dashboard" && (
+            <DashboardView
+              cases={cases}
+              alerts={alerts}
+              onSelectCase={handleSelectCase}
+              onNavigate={(v: string) => setCurrentView(v)}
+              onOpenCreateCase={() => setIsCreateModalOpen(true)}
+            />
+          )}
+
+          {currentView === "cases" && (
+            <CasesListView
+              cases={cases}
+              onSelectCase={handleSelectCase}
+              onOpenCreateCase={() => setIsCreateModalOpen(true)}
+            />
+          )}
+
+          {currentView === "case_detail" && selectedCase && (
+            <CaseDetailView
+              investigationCase={selectedCase}
+              currentRole={currentUser.role}
+              onBack={() => setCurrentView("cases")}
+              onUpdateStatus={handleUpdateCaseStatus}
+              onAddNote={handleAddNote}
+            />
+          )}
+
+          {currentView === "wallet" && (
+            <WalletInvestigationView
+              onOpenCreateCaseWithAddress={(addr: string, chain: Chain) => {
+                setIsCreateModalOpen(true);
+              }}
+              onAddToWatchtower={(addr: string, chain: Chain, label: string) => {
+                handleAddToWatchtower({
+                  address: addr,
+                  chain,
+                  label,
+                  status: "ACTIVE",
+                  riskScore: 88,
+                  balanceUsd: 14200,
+                });
+              }}
+            />
+          )}
+
+          {currentView === "watchtower" && (
+            <WatchtowerView
+              watchlist={watchlist}
+              onAddWallet={handleAddToWatchtower}
+              onRemoveWallet={handleRemoveFromWatchtower}
+              onSelectCase={handleSelectCase}
+            />
+          )}
+
+          {currentView === "crosschain" && <CrossChainView />}
+
+          {currentView === "alerts" && (
+            <AlertsView
+              alerts={alerts}
+              onAcknowledge={handleAcknowledgeAlert}
+              onSelectCase={handleSelectCase}
+            />
+          )}
+
+          {currentView === "assistant" && <AssistantView />}
+
+          {currentView === "evidence" && (
+            <EvidenceCenterView cases={cases} onSelectCase={handleSelectCase} />
+          )}
+
+          {currentView === "actionpack" && <ActionPackView cases={cases} />}
+
+          {currentView === "integrations" && (
+            <IntegrationsView providers={INITIAL_PROVIDERS} vasps={INITIAL_VASPS} />
+          )}
+
+          {currentView === "settings" && (
+            <SettingsView
+              currentUser={currentUser}
+              availableUsers={INITIAL_USERS}
+              onSwitchUser={setCurrentUser}
+            />
+          )}
+
+          <CreateCaseModal
+            isOpen={isCreateModalOpen}
+            onClose={() => setIsCreateModalOpen(false)}
+            onCreateCase={handleCreateCase}
           />
-        )}
-
-        {currentView === "cases" && (
-          <CasesListView
-            cases={cases}
-            onSelectCase={handleSelectCase}
-            onOpenCreateCase={() => setIsCreateModalOpen(true)}
-          />
-        )}
-
-        {currentView === "case_detail" && selectedCase && (
-          <CaseDetailView
-            investigationCase={selectedCase}
-            currentRole={currentUser.role}
-            onBack={() => setCurrentView("cases")}
-            onUpdateStatus={handleUpdateCaseStatus}
-            onAddNote={handleAddNote}
-          />
-        )}
-
-        {currentView === "wallet" && (
-          <WalletInvestigationView
-            onOpenCreateCaseWithAddress={(addr: string, chain: Chain) => {
-              setIsCreateModalOpen(true);
-            }}
-            onAddToWatchtower={(addr: string, chain: Chain, label: string) => {
-              handleAddToWatchtower({
-                address: addr,
-                chain,
-                label,
-                status: "ACTIVE",
-                riskScore: 88,
-                balanceUsd: 14200,
-              });
-            }}
-          />
-        )}
-
-        {currentView === "watchtower" && (
-          <WatchtowerView
-            watchlist={watchlist}
-            onAddWallet={handleAddToWatchtower}
-            onRemoveWallet={handleRemoveFromWatchtower}
-            onSelectCase={handleSelectCase}
-          />
-        )}
-
-        {currentView === "crosschain" && <CrossChainView />}
-
-        {currentView === "alerts" && (
-          <AlertsView
-            alerts={alerts}
-            onAcknowledge={handleAcknowledgeAlert}
-            onSelectCase={handleSelectCase}
-          />
-        )}
-
-        {currentView === "assistant" && <AssistantView />}
-
-        {currentView === "evidence" && (
-          <EvidenceCenterView cases={cases} onSelectCase={handleSelectCase} />
-        )}
-
-        {currentView === "actionpack" && <ActionPackView cases={cases} />}
-
-        {currentView === "integrations" && (
-          <IntegrationsView providers={INITIAL_PROVIDERS} vasps={INITIAL_VASPS} />
-        )}
-
-        {currentView === "settings" && (
-          <SettingsView
-            currentUser={currentUser}
-            availableUsers={INITIAL_USERS}
-            onSwitchUser={setCurrentUser}
-          />
-        )}
-
-        <CreateCaseModal
-          isOpen={isCreateModalOpen}
-          onClose={() => setIsCreateModalOpen(false)}
-          onCreateCase={handleCreateCase}
-        />
-      </AppShell>
-    </LiveBitcoinProvider>
+        </AppShell>
+      </LiveBitcoinProvider>
+    </MultiChainProvider>
   );
 }
